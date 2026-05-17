@@ -1,0 +1,8 @@
+{
+  "name": "DM Hospital",
+  "description": "A professional medical center website for DM Hospital, featuring clinical excellence and simplified appointment booking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

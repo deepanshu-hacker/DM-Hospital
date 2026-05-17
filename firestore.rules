@@ -1,0 +1,103 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'itsdeepanshudc@gmail.com' ||
+        request.auth.token.email == 'deepanshuchopra0786@gmail.com'
+      );
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.uid == request.auth.uid 
+          && data.email is string 
+          && data.email.size() <= 200
+          && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100))
+          && (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 20));
+      }
+
+      allow get: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if (isOwner(userId) && isValidUser(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'phoneNumber']))
+        || isAdmin();
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow create: if isSignedIn() 
+        && request.auth.uid == adminId 
+        && request.auth.token.email == 'itsdeepanshudc@gmail.com';
+    }
+
+    // Appointments Collection
+    match /appointments/{appointmentId} {
+      function isValidAppointment(data) {
+        return (data.userId is string && data.userId.size() <= 128)
+          && data.patientName is string && data.patientName.size() <= 100
+          && data.email is string && data.email.size() <= 200
+          && data.phone is string && data.phone.size() <= 20
+          && data.date is string && data.date.size() <= 50
+          && data.department is string && data.department.size() <= 100
+          && data.doctor is string && data.doctor.size() <= 100
+          && data.status in ['pending', 'confirmed', 'completed', 'cancelled', 'hold']
+          && (data.createdAt == request.time || data.createdAt == existing().createdAt)
+          && (!('adminRemark' in data) || (data.adminRemark is string && data.adminRemark.size() <= 1000));
+      }
+
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      
+      allow create: if (isSignedIn() 
+        && isValidAppointment(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && isValidId(appointmentId))
+        || (isAdmin() && isValidAppointment(incoming()) && isValidId(appointmentId));
+        
+      allow update: if (isAdmin() && isValidAppointment(incoming())) || (isSignedIn() 
+        && existing().userId == request.auth.uid
+        && isValidAppointment(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action: Cancel
+          (incoming().status == 'cancelled' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && incoming().updatedAt == request.time)
+          || (incoming().diff(existing()).affectedKeys().hasOnly(['patientName', 'email', 'phone', 'date', 'department', 'doctor', 'message', 'updatedAt']) && incoming().updatedAt == request.time)
+        ));
+
+      allow delete: if isAdmin();
+    }
+  }
+}
